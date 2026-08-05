@@ -8,6 +8,7 @@
     }
   ],
   "routes": [
+    { "handle": "filesystem" },
     { "src": "/splash", "dest": "/splash.html" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
