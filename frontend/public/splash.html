@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Fundingwise — Loading…</title>
+    <style>
+      html,body{height:100%;margin:0}
+      body{display:flex;align-items:center;justify-content:center;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;color:#111;background:linear-gradient(180deg,#f8fafc,#eef2ff)}
+      .card{max-width:680px;padding:32px;border-radius:12px;text-align:center;box-shadow:0 6px 24px rgba(16,24,40,0.08);background:white}
+      .logo{font-weight:700;font-size:20px;margin-bottom:8px}
+      .msg{color:#334155}
+      .spinner{margin-top:18px;width:36px;height:36px;border-radius:50%;border:4px solid #e6edf3;border-top-color:#6366f1;animation:spin 1s linear infinite}
+      @keyframes spin{to{transform:rotate(360deg)}}
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">Fundingwise</div>
+      <div class="msg">Loading application… If you see this for more than a few seconds, try <a href="/">reload</a> or visit the <a href="/splash">splash</a> again.</div>
+      <div class="spinner" aria-hidden></div>
+    </div>
+
+    <script>
+      // After a short delay attempt to navigate to the SPA root so client-side router can take over.
+      setTimeout(()=>{
+        if(window.location.pathname !== '/' && window.location.pathname !== '/splash'){
+          // rewrite to root so the SPA receives path on load; Vercel will serve index.html
+          window.location.replace('/');
+        }
+      }, 800);
+    </script>
+  </body>
+</html>
