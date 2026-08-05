@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+env/
+venv/
+.venv/
+build/
+dist/
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.eslintcache
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Logs
+*.log
+frontend-dev.err.log
+frontend-dev.out.log
+
+# Firebase admin key and other secrets
+backend/firebase/*.json
+firebase/*.json
+*.key
+*.pem
+
+# OS
+.DS_Store

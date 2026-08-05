@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071629" />
+    <link rel="icon" type="image/png" href="/logo-icon-dark.png" />
+    <title>Fundingwise</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, rgba(18, 207, 195, 0.18), transparent 30%),
+          radial-gradient(circle at bottom right, rgba(15, 98, 254, 0.14), transparent 32%),
+          linear-gradient(180deg, #f5f8fc 0%, #e8eef6 100%);
+        font-family: "IBM Plex Sans", "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      body {
+        color: #0f172a;
+      }
+
+      #fw-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.1) 44%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(239, 245, 252, 0.9));
+        transition: opacity 320ms ease, transform 320ms ease;
+      }
+
+      html.fw-ready #fw-splash {
+        opacity: 0;
+        transform: scale(0.985);
+        pointer-events: none;
+      }
+
+      .fw-splash-card {
+        width: min(1120px, 100%);
+        display: grid;
+        gap: 24px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        align-items: center;
+        padding: 28px;
+        border-radius: 28px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+      }
+
+      .fw-splash-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(15, 98, 254, 0.1);
+        color: #0f62fe;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .fw-splash-title {
+        margin: 18px 0 12px;
+        font-size: clamp(2.45rem, 6vw, 4.7rem);
+        line-height: 0.98;
+        letter-spacing: -0.05em;
+        font-weight: 800;
+      }
+
+      .fw-splash-copy {
+        margin: 0;
+        max-width: 42rem;
+        font-size: 1.02rem;
+        line-height: 1.72;
+        color: #43546b;
+      }
+
+      .fw-splash-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 22px;
+      }
+
+      .fw-splash-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        padding: 0 18px;
+        border-radius: 16px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+      }
+
+      .fw-splash-button:hover {
+        transform: translateY(-1px);
+      }
+
+      .fw-splash-button--primary {
+        background: linear-gradient(135deg, #0f62fe, #2f7bff);
+        color: #ffffff;
+        box-shadow: 0 14px 32px rgba(15, 98, 254, 0.2);
+      }
+
+      .fw-splash-button--secondary {
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: rgba(255, 255, 255, 0.82);
+        color: #0f172a;
+      }
+
+      .fw-splash-panel {
+        display: grid;
+        gap: 16px;
+      }
+
+      .fw-splash-logo {
+        width: 100%;
+        border-radius: 22px;
+        background: rgba(15, 23, 42, 0.03);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+
+      .fw-splash-status {
+        display: grid;
+        gap: 10px;
+        padding: 18px 20px;
+        border-radius: 22px;
+        background: rgba(15, 23, 42, 0.04);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+      }
+
+      .fw-splash-status-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #62718a;
+      }
+
+      .fw-splash-bar {
+        position: relative;
+        overflow: hidden;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(15, 98, 254, 0.08);
+      }
+
+      .fw-splash-bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #12cfc3, #0f62fe, #f1c21b);
+        animation: fw-slide 1.8s ease-in-out infinite;
+      }
+
+      .fw-splash-foot {
+        color: #5c6c80;
+        font-size: 0.94rem;
+        line-height: 1.6;
+      }
+
+      @keyframes fw-slide {
+        0% {
+          transform: translateX(-20%);
+        }
+        50% {
+          transform: translateX(100%);
+        }
+        100% {
+          transform: translateX(220%);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .fw-splash-bar::after,
+        .fw-splash-button,
+        #fw-splash {
+          animation: none;
+          transition: none;
+        }
+      }
+    </style>
+    <script>
+      window.addEventListener("load", function () {
+        document.documentElement.classList.add("fw-ready");
+        window.setTimeout(function () {
+          var splash = document.getElementById("fw-splash");
+          if (splash) splash.remove();
+        }, 360);
+      });
+    </script>
+  </head>
+  <body>
+    <div id="fw-splash" aria-hidden="true">
+      <main class="fw-splash-card">
+        <section>
+          <div class="fw-splash-eyebrow">Fundingwise</div>
+          <h1 class="fw-splash-title">Transparent civic operations, built with control and clarity.</h1>
+          <p class="fw-splash-copy">
+            Loading your secure workspace for labor planning, inventory movement, public reporting, and organization management.
+          </p>
+          <div class="fw-splash-actions">
+            <a class="fw-splash-button fw-splash-button--primary" href="/">Open workspace</a>
+            <a class="fw-splash-button fw-splash-button--secondary" href="/login">Sign in</a>
+          </div>
+        </section>
+
+        <aside class="fw-splash-panel">
+          <img src="/logo-full.png" alt="Fundingwise" class="fw-splash-logo" />
+          <div class="fw-splash-status">
+            <div class="fw-splash-status-label">Loading secure stack</div>
+            <div class="fw-splash-bar" aria-hidden="true"></div>
+            <div class="fw-splash-foot">Firebase authentication, IBM-inspired design language, and role-aware civic workflows.</div>
+          </div>
+        </aside>
+      </main>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
