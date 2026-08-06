@@ -16,6 +16,7 @@ class UserBase(BaseModel):
     name: str
     role: Literal["citizen", "official", "admin"]
     organization_id: Optional[str] = None
+    active: bool = True
 
 
 class UserProfileUpsert(BaseModel):
@@ -47,6 +48,7 @@ class UserPublic(UserBase):
             name=doc["name"],
             role=doc["role"],
             organization_id=doc.get("organization_id"),
+            active=doc.get("active", True),
             created_at=doc.get("created_at", utcnow()),
             photo_url=doc.get("photo_url"),
             email_verified=doc.get("email_verified", False),

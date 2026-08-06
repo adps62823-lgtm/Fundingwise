@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -185,6 +186,9 @@ export default function AdminHome() {
                         )}
                       </div>
                       <div className="flex gap-2">
+                        <Link className="ibm-button-ghost" to={`/admin/orgs/${org.id}`}>
+                          View details
+                        </Link>
                         <button className="ibm-button-primary" onClick={() => handleApprove(org.id)}>
                           Approve
                         </button>
@@ -203,7 +207,7 @@ export default function AdminHome() {
               <h2 className="text-xl font-semibold text-[#0f172a]">All organizations</h2>
               <div className="max-h-[26rem] space-y-3 overflow-auto pr-1">
                 {organizations.map((org) => (
-                  <div key={org.id} className="ibm-panel">
+                  <Link key={org.id} to={`/admin/orgs/${org.id}`} className="ibm-panel block transition hover:border-[#0f62fe]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-semibold text-[#0f172a]">{org.name}</div>
@@ -213,7 +217,7 @@ export default function AdminHome() {
                       </div>
                       <span className="ibm-chip">{org.subscription_status}</span>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </section>

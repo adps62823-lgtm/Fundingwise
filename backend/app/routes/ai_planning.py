@@ -3,7 +3,7 @@ from __future__ import annotations
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_service
 from app.database import get_db
 from app.services.ai_service import generate_cost_and_timeline
 from app.services.version_service import publish_version
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v1/ai-planning", tags=["ai-planning"])
 
 
 @router.post("/projects/{project_id}/draft")
-async def generate_ai_draft(project_id: str, payload: dict, user=Depends(require_role("official")), db=Depends(get_db)):
+async def generate_ai_draft(project_id: str, payload: dict, user=Depends(require_service("ai_planning")), db=Depends(get_db)):
     project = await db.projects.find_one({"_id": ObjectId(project_id), "org_id": user["organization_id"]})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -45,6 +45,6 @@ async def generate_ai_draft(project_id: str, payload: dict, user=Depends(require
 
 
 @router.post("/projects/{project_id}/publish")
-async def publish(project_id: str, payload: dict, user=Depends(require_role("official")), db=Depends(get_db)):
+async def publish(project_id: str, payload: dict, user=Depends(require_service("ai_planning")), db=Depends(get_db)):
     version = await publish_version(project_id, payload.get("edited_fields", {}), payload.get("notes"), str(user["_id"]), db)
     return {"data": version, "error": None}

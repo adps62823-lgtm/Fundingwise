@@ -23,6 +23,7 @@ const LaborConsole = lazy(() => import("./pages/official/LaborConsole"));
 const InventoryConsole = lazy(() => import("./pages/official/InventoryConsole"));
 const ContractorSelection = lazy(() => import("./pages/official/ContractorSelection"));
 const AdminHome = lazy(() => import("./pages/admin/AdminHome"));
+const OrgDetail = lazy(() => import("./pages/admin/OrgDetail"));
 
 const shellLinks = {
   public: [
@@ -139,6 +140,7 @@ export default function App() {
             <Route path="/dashboard/inventory" element={<ProtectedRoute role="official"><InventoryConsole /></ProtectedRoute>} />
             <Route path="/dashboard/projects/:id/contractors" element={<ProtectedRoute role="official"><ContractorSelection /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute role="admin"><AdminHome /></ProtectedRoute>} />
+            <Route path="/admin/orgs/:orgId" element={<ProtectedRoute role="admin"><OrgDetail /></ProtectedRoute>} />
           </Routes>
         </ShellLayout>
       </AppErrorBoundary>
