@@ -26,3 +26,5 @@ export const resetEmployeePassword = async (orgId, userId) =>
   (await client.post(`/api/v1/subscriptions/orgs/${orgId}/employees/${userId}/reset-password`)).data;
 export const updateOrgEmployee = async (orgId, userId, payload) =>
   (await client.patch(`/api/v1/subscriptions/orgs/${orgId}/employees/${userId}`, payload)).data;
+export const deleteOrgEmployee = async (orgId, userId) =>
+  (await client.delete(`/api/v1/subscriptions/orgs/${orgId}/employees/${userId}`)).data;

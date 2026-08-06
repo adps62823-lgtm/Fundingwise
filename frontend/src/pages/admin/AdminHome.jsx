@@ -1,283 +1,319 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import {
-  approveOrg,
-  createApiKey,
-  getApiKeyUsage,
-  listApiKeys,
-  listOrganizations,
-  listPendingOrgs,
-  suspendOrg,
-} from "../../api/subscriptions";
-
-function UsageChart({ data }) {
-  return (
-    <div className="ibm-panel h-72 p-4">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data}>
-          <CartesianGrid stroke="rgba(15, 23, 42, 0.08)" vertical={false} />
-          <XAxis dataKey="day" tick={{ fill: "#475569", fontSize: 12 }} />
-          <YAxis tick={{ fill: "#475569", fontSize: 12 }} />
-          <Tooltip
-            contentStyle={{
-              background: "#ffffff",
-              border: "1px solid rgba(15, 23, 42, 0.12)",
-              borderRadius: 16,
-              color: "#0f172a",
-            }}
-          />
-          <Bar dataKey="calls" fill="#0f62fe" radius={[8, 8, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }) {
-  return (
-    <div className="ibm-kpi">
-      <div className="ibm-kpi__label">{label}</div>
-      <div className="ibm-kpi__value">{value}</div>
-    </div>
-  );
-}
+import { approveOrg, createApiKey, listApiKeys, listOrganizations, listPendingOrgs, suspendOrg } from "../../api/subscriptions";
 
 export default function AdminHome() {
-  const [pendingOrgs, setPendingOrgs] = useState([]);
-  const [organizations, setOrganizations] = useState([]);
-  const [apiKeys, setApiKeys] = useState([]);
-  const [usage, setUsage] = useState([]);
-  const [selectedKeyId, setSelectedKeyId] = useState("");
-  const [activeTab, setActiveTab] = useState("orgs");
-  const [apiKeyForm, setApiKeyForm] = useState({ client_name: "", label: "", org_id: "" });
-  const [createdKey, setCreatedKey] = useState("");
+  const [pending, setPending] = useState([]);
+  const [orgs, setOrgs] = useState([]);
+  const [keys, setKeys] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const refresh = async () => {
-    const [pendingResponse, orgResponse, keyResponse] = await Promise.all([
-      listPendingOrgs(),
-      listOrganizations(),
-      listApiKeys(),
-    ]);
-    setPendingOrgs(pendingResponse.data || []);
-    setOrganizations(orgResponse.data || []);
-    setApiKeys(keyResponse.data || []);
-    if (!selectedKeyId && keyResponse.data?.[0]?.id) {
-      setSelectedKeyId(keyResponse.data[0].id);
+  const [orgFilter, setOrgFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const [newKeyOrgId, setNewKeyOrgId] = useState("");
+  const [newKeyLabel, setNewKeyLabel] = useState("");
+  const [issuedKey, setIssuedKey] = useState(null);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [pRes, oRes, kRes] = await Promise.all([
+        listPendingOrgs(),
+        listOrganizations(),
+        listApiKeys(),
+      ]);
+      setPending(pRes || []);
+      setOrgs(oRes || []);
+      setKeys(kRes || []);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to load admin dashboard data");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadData();
   }, []);
 
-  useEffect(() => {
-    if (!selectedKeyId) {
-      setUsage([]);
-      return;
-    }
-
-    getApiKeyUsage(selectedKeyId).then((response) => {
-      const daily = response.data?.daily_usage || {};
-      const rows = Object.entries(daily)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .slice(-14)
-        .map(([day, calls]) => ({ day: day.slice(5), calls }));
-      setUsage(rows);
-    });
-  }, [selectedKeyId]);
-
-  const summary = useMemo(
-    () => ({
-      totalOrgs: organizations.length,
-      activeOrgs: organizations.filter((org) => org.subscription_status === "active").length,
-      pendingOrgs: pendingOrgs.length,
-      keys: apiKeys.length,
-    }),
-    [organizations, pendingOrgs, apiKeys],
-  );
-
   const handleApprove = async (id) => {
-    await approveOrg(id);
-    await refresh();
+    try {
+      await approveOrg(id);
+      await loadData();
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Failed to approve organization");
+    }
   };
 
   const handleSuspend = async (id) => {
-    await suspendOrg(id);
-    await refresh();
+    if (!window.confirm("Are you sure you want to suspend this organization?")) return;
+    try {
+      await suspendOrg(id);
+      await loadData();
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Failed to suspend organization");
+    }
   };
 
-  const handleCreateApiKey = async (event) => {
-    event.preventDefault();
-    const response = await createApiKey(apiKeyForm);
-    setCreatedKey(response.data.key);
-    setApiKeyForm({ client_name: "", label: "", org_id: "" });
-    await refresh();
-    setSelectedKeyId(response.data.id);
+  const handleCreateKey = async (e) => {
+    e.preventDefault();
+    if (!newKeyOrgId) return alert("Select an organization");
+    try {
+      const res = await createApiKey({ org_id: newKeyOrgId, label: newKeyLabel || "B2B Production Key" });
+      setIssuedKey(res);
+      setNewKeyLabel("");
+      await loadData();
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Failed to issue API Key");
+    }
   };
+
+  const filteredOrgs = orgs.filter((org) => {
+    const matchesStatus = orgFilter === "all" || org.subscription_status === orgFilter;
+    const matchesSearch =
+      !searchQuery ||
+      org.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      org.poc_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      org.poc_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      org.id?.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
 
   return (
-    <div className="fw-container py-10">
-      <div className="ibm-panel">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="space-y-6">
+      <header className="ibm-panel flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="ibm-h2">Superadmin Command Console</h1>
+          <p className="ibm-caption mt-1">Manage B2B municipal subscriptions, organization profiles, microservice access, and employees</p>
+        </div>
+        <button type="button" onClick={loadData} className="ibm-button-secondary text-xs">
+          Refresh Data
+        </button>
+      </header>
+
+      {error && <div className="ibm-alert ibm-alert--error">{error}</div>}
+
+      {/* Pending Approvals */}
+      <section className="ibm-panel space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="ibm-h3 text-[#0f172a]">Pending Registrations ({pending.length})</h2>
+          <span className="ibm-badge ibm-badge--warning">{pending.length} Require Action</span>
+        </div>
+        {loading ? (
+          <div className="ibm-caption">Loading queue...</div>
+        ) : pending.length === 0 ? (
+          <p className="ibm-caption">No pending organization signup requests.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-[#e2e8f0] bg-[#f8fafc]">
+                  <th className="p-3 font-semibold text-[#334155]">Org ID</th>
+                  <th className="p-3 font-semibold text-[#334155]">Org Name</th>
+                  <th className="p-3 font-semibold text-[#334155]">POC & Email</th>
+                  <th className="p-3 font-semibold text-[#334155]">Tier</th>
+                  <th className="p-3 font-semibold text-[#334155] text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((p) => (
+                  <tr key={p.id} className="border-b border-[#f1f5f9] hover:bg-[#f8fafc]">
+                    <td className="p-3 font-mono text-xs text-[#64748b]">{p.id}</td>
+                    <td className="p-3 font-medium text-[#0f172a]">{p.name}</td>
+                    <td className="p-3">
+                      <div className="text-xs font-medium text-[#0f172a]">{p.poc_name}</div>
+                      <div className="text-xs text-[#64748b]">{p.poc_email}</div>
+                    </td>
+                    <td className="p-3">
+                      <span className="ibm-badge ibm-badge--info uppercase text-[10px]">{p.subscription_tier}</span>
+                    </td>
+                    <td className="p-3 text-right space-x-2">
+                      <button type="button" onClick={() => handleApprove(p.id)} className="ibm-button-primary text-xs py-1 px-3">
+                        Approve
+                      </button>
+                      <Link to={`/admin/orgs/${p.id}`} className="ibm-button-secondary text-xs py-1 px-3">
+                        View Details
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Active Organizations Directory */}
+      <section className="ibm-panel space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="ibm-title text-4xl">Admin Console</h1>
-            <p className="mt-2 max-w-3xl text-[#4b5563]">
-              Manage organizations, subscriptions, and B2B API access from one place.
-            </p>
+            <h2 className="ibm-h3 text-[#0f172a]">Organizations Directory ({orgs.length})</h2>
+            <p className="ibm-caption">Click on any organization to view full details, active microservices, and manage employees</p>
           </div>
-
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <SummaryCard label="Organizations" value={summary.totalOrgs} />
-            <SummaryCard label="Active orgs" value={summary.activeOrgs} />
-            <SummaryCard label="Pending" value={summary.pendingOrgs} />
-            <SummaryCard label="API keys" value={summary.keys} />
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="text"
+              placeholder="Search by name, email, ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="ibm-input text-xs w-60"
+            />
+            <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} className="ibm-select text-xs w-36">
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="suspended">Suspended</option>
+              <option value="deleted">Deleted</option>
+            </select>
           </div>
         </div>
 
-        <div className="mt-8 flex flex-wrap gap-2">
-          <button
-            className={activeTab === "orgs" ? "ibm-button-primary" : "ibm-button-ghost"}
-            onClick={() => setActiveTab("orgs")}
-          >
-            Organizations
-          </button>
-          <button
-            className={activeTab === "keys" ? "ibm-button-primary" : "ibm-button-ghost"}
-            onClick={() => setActiveTab("keys")}
-          >
-            API Keys
-          </button>
-        </div>
-
-        {activeTab === "orgs" && (
-          <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_.8fr]">
-            <section>
-              <h2 className="text-xl font-semibold text-[#0f172a]">Subscription requests</h2>
-              <p className="mt-1 text-sm text-[#6b7280]">
-                Organizations that submitted the "Request Access" form on the Pricing page, waiting on manual approval.
-              </p>
-              <div className="mt-4 space-y-3">
-                {pendingOrgs.map((org) => (
-                  <div key={org.id} className="ibm-panel">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-[#0f172a]">{org.name}</div>
-                        <div className="text-sm text-[#4b5563]">
-                          {org.city}, {org.state} &middot; {org.type}
-                        </div>
-                        <div className="mt-1 text-xs uppercase tracking-[0.18em] text-[#6b7280]">
-                          Requested tier: {org.subscription_tier}
-                        </div>
-                        {(org.contact_email || org.contact_phone) && (
-                          <div className="mt-2 text-sm text-[#4b5563]">
-                            {org.contact_email && <div>Email: {org.contact_email}</div>}
-                            {org.contact_phone && <div>Phone: {org.contact_phone}</div>}
-                          </div>
-                        )}
+        {loading ? (
+          <div className="ibm-caption">Loading directory...</div>
+        ) : filteredOrgs.length === 0 ? (
+          <p className="ibm-caption">No organizations match the filter criteria.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-[#e2e8f0] bg-[#f8fafc]">
+                  <th className="p-3 font-semibold text-[#334155]">Org ID</th>
+                  <th className="p-3 font-semibold text-[#334155]">Organization</th>
+                  <th className="p-3 font-semibold text-[#334155]">Point of Contact</th>
+                  <th className="p-3 font-semibold text-[#334155]">Tier</th>
+                  <th className="p-3 font-semibold text-[#334155]">Status</th>
+                  <th className="p-3 font-semibold text-[#334155]">Active Microservices</th>
+                  <th className="p-3 font-semibold text-[#334155] text-right">Manage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrgs.map((o) => (
+                  <tr key={o.id} className="border-b border-[#f1f5f9] hover:bg-[#f8fafc]">
+                    <td className="p-3 font-mono text-xs text-[#64748b]">{o.id}</td>
+                    <td className="p-3">
+                      <Link to={`/admin/orgs/${o.id}`} className="font-semibold text-[#0284c7] hover:underline">
+                        {o.name}
+                      </Link>
+                    </td>
+                    <td className="p-3">
+                      <div className="text-xs font-medium text-[#0f172a]">{o.poc_name}</div>
+                      <div className="text-xs text-[#64748b]">{o.poc_email}</div>
+                    </td>
+                    <td className="p-3">
+                      <span className="ibm-badge ibm-badge--info uppercase text-[10px]">{o.subscription_tier}</span>
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`ibm-badge uppercase text-[10px] ${
+                          o.subscription_status === "active"
+                            ? "ibm-badge--success"
+                            : o.subscription_status === "pending"
+                            ? "ibm-badge--warning"
+                            : "ibm-badge--error"
+                        }`}
+                      >
+                        {o.subscription_status}
+                      </span>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(o.active_services || []).map((s) => (
+                          <span key={s} className="px-1.5 py-0.5 text-[10px] bg-[#f1f5f9] text-[#475569] rounded font-mono">
+                            {s}
+                          </span>
+                        ))}
                       </div>
-                      <div className="flex gap-2">
-                        <Link className="ibm-button-ghost" to={`/admin/orgs/${org.id}`}>
-                          View details
-                        </Link>
-                        <button className="ibm-button-primary" onClick={() => handleApprove(org.id)}>
-                          Approve
-                        </button>
-                        <button className="ibm-button-secondary" onClick={() => handleSuspend(org.id)}>
+                    </td>
+                    <td className="p-3 text-right space-x-2">
+                      <Link to={`/admin/orgs/${o.id}`} className="ibm-button-primary text-xs py-1 px-2.5">
+                        Manage Org
+                      </Link>
+                      {o.subscription_status === "active" && (
+                        <button type="button" onClick={() => handleSuspend(o.id)} className="ibm-button-secondary text-xs py-1 px-2.5 text-red-600">
                           Suspend
                         </button>
-                      </div>
-                    </div>
-                  </div>
+                      )}
+                    </td>
+                  </tr>
                 ))}
-                {!pendingOrgs.length && <p className="text-sm text-[#6b7280]">No pending subscription requests right now.</p>}
-              </div>
-            </section>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-            <section className="space-y-4">
-              <h2 className="text-xl font-semibold text-[#0f172a]">All organizations</h2>
-              <div className="max-h-[26rem] space-y-3 overflow-auto pr-1">
-                {organizations.map((org) => (
-                  <Link key={org.id} to={`/admin/orgs/${org.id}`} className="ibm-panel block transition hover:border-[#0f62fe]">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-[#0f172a]">{org.name}</div>
-                        <div className="text-sm text-[#4b5563]">
-                          {org.city}, {org.state}
-                        </div>
-                      </div>
-                      <span className="ibm-chip">{org.subscription_status}</span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
+      {/* B2B API Keys & Credentials */}
+      <section className="ibm-panel space-y-4">
+        <h2 className="ibm-h3 text-[#0f172a]">B2B API Keys & Credentials</h2>
+        <form onSubmit={handleCreateKey} className="flex flex-wrap items-end gap-3 bg-[#f8fafc] p-4 rounded border border-[#e2e8f0]">
+          <div className="w-64 space-y-1">
+            <label className="ibm-label text-xs">Target Organization</label>
+            <select value={newKeyOrgId} onChange={(e) => setNewKeyOrgId(e.target.value)} className="ibm-select text-xs w-full" required>
+              <option value="">-- Select Org --</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name} ({o.subscription_tier})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="w-64 space-y-1">
+            <label className="ibm-label text-xs">Key Label</label>
+            <input
+              type="text"
+              placeholder="e.g. Production Mobile App"
+              value={newKeyLabel}
+              onChange={(e) => setNewKeyLabel(e.target.value)}
+              className="ibm-input text-xs w-full"
+            />
+          </div>
+          <button type="submit" className="ibm-button-primary text-xs py-2 px-4">
+            Issue API Key
+          </button>
+        </form>
+
+        {issuedKey && (
+          <div className="ibm-alert ibm-alert--success space-y-2">
+            <div className="font-semibold">New API Key Generated!</div>
+            <p className="text-xs">Save this key immediately. It will not be shown again.</p>
+            <div className="font-mono text-xs bg-white p-2 rounded border border-[#cbd5e1] select-all font-bold text-[#0f172a]">
+              {issuedKey.api_key}
+            </div>
           </div>
         )}
 
-        {activeTab === "keys" && (
-          <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_.95fr]">
-            <section>
-              <h2 className="text-xl font-semibold text-[#0f172a]">Create API key</h2>
-              <form onSubmit={handleCreateApiKey} className="mt-4 space-y-3">
-                <input className="ibm-input" placeholder="Client name" value={apiKeyForm.client_name} onChange={(e) => setApiKeyForm({ ...apiKeyForm, client_name: e.target.value })} />
-                <input className="ibm-input" placeholder="Label" value={apiKeyForm.label} onChange={(e) => setApiKeyForm({ ...apiKeyForm, label: e.target.value })} />
-                <input className="ibm-input" placeholder="Optional organization id" value={apiKeyForm.org_id} onChange={(e) => setApiKeyForm({ ...apiKeyForm, org_id: e.target.value })} />
-                <button className="ibm-button-primary" type="submit">
-                  Generate key
-                </button>
-              </form>
-
-              {createdKey && (
-                <div className="mt-4 rounded-[4px] border border-[#c9c9c9] bg-[#eef4ff] p-4 text-sm text-[#0176d3]">
-                  New API key: <span className="font-mono">{createdKey}</span>
-                </div>
-              )}
-            </section>
-
-            <section>
-              <h2 className="text-xl font-semibold text-[#0f172a]">Usage dashboard</h2>
-              <select className="ibm-select mt-4" value={selectedKeyId} onChange={(e) => setSelectedKeyId(e.target.value)}>
-                <option value="">Select an API key</option>
-                {apiKeys.map((key) => (
-                  <option key={key.id} value={key.id}>
-                    {key.label} ({key.total_calls || 0} calls)
-                  </option>
-                ))}
-              </select>
-
-              <div className="mt-4 ibm-panel">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm text-[#6b7280]">Selected key</div>
-                    <div className="font-semibold text-[#0f172a]">
-                      {apiKeys.find((key) => key.id === selectedKeyId)?.label || "No key selected"}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-[#6b7280]">Lifetime calls</div>
-                    <div className="text-xl font-bold text-[#0f172a]">
-                      {apiKeys.find((key) => key.id === selectedKeyId)?.total_calls || 0}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <UsageChart data={usage.length ? usage : [{ day: "No data", calls: 0 }]} />
-                </div>
-              </div>
-            </section>
-          </div>
-        )}
-      </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-[#e2e8f0]">
+                <th className="p-2 font-semibold text-[#334155]">Key Prefix</th>
+                <th className="p-2 font-semibold text-[#334155]">Label</th>
+                <th className="p-2 font-semibold text-[#334155]">Org ID</th>
+                <th className="p-2 font-semibold text-[#334155]">Rate Limit</th>
+                <th className="p-2 font-semibold text-[#334155]">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => (
+                <tr key={k.key_id} className="border-b border-[#f1f5f9]">
+                  <td className="p-2 font-mono text-xs text-[#0f172a]">{k.prefix}...</td>
+                  <td className="p-2 text-xs text-[#334155]">{k.label}</td>
+                  <td className="p-2 font-mono text-xs text-[#64748b]">{k.org_id}</td>
+                  <td className="p-2 text-xs">{k.rate_limit_per_min} req/min</td>
+                  <td className="p-2">
+                    <span className={`ibm-badge text-[10px] ${k.is_active ? "ibm-badge--success" : "ibm-badge--error"}`}>
+                      {k.is_active ? "Active" : "Revoked"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

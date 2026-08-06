@@ -1,358 +1,410 @@
-from __future__ import annotations
+import secrets
+import string
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, EmailStr, Field
 
-import re
-from datetime import datetime, timedelta, timezone
-
-from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException
-
-from app.auth.dependencies import require_role
+from app.auth.dependencies import require_roles
 from app.database import get_db
-from app.models.service_catalog import SERVICE_CATALOG, normalize_services
-from app.models.subscription import ApiKey, SubscriptionTier
-from app.services.firebase_auth import get_or_create_firebase_user
-from app.utils.security import generate_api_key, generate_temp_password, hash_password
-from app.utils.serializers import serialize_doc
+from app.models.organization import (
+    DEFAULT_ACTIVE_SERVICES,
+    DEFAULT_SERVICE_TIERS,
+    MicroserviceName,
+    OrganizationCreate,
+    OrganizationOut,
+    OrganizationStatus,
+    SubscriptionTier,
+)
+from app.models.service_catalog import SERVICE_TIER_CATALOG
+from app.models.user import UserInDB, UserRole
+from app.services.b2b_service import (
+    approve_org_signup,
+    create_api_key_for_org,
+    get_api_key_usage_stats,
+    list_all_organizations,
+    list_pending_orgs,
+    list_org_api_keys,
+    register_organization,
+    suspend_org_subscription,
+)
 
-router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
-
-ORG_EDITABLE_FIELDS = {"name", "city", "state", "poc_name", "contact_email", "contact_phone", "subscription_tier"}
-
-
-@router.get("/tiers")
-async def get_tiers():
-    # Single source of truth for pricing - the frontend Pricing page should read
-    # from this instead of hardcoding tier names, so the two can never drift apart.
-    return {"data": SubscriptionTier, "error": None}
-
-
-@router.post("/org-signup")
-async def org_signup(payload: dict, db=Depends(get_db)):
-    slug = re.sub(r"[^a-z0-9]+", "-", payload["name"].lower()).strip("-")
-    requested_tier = payload.get("requested_tier", "trial")
-    if requested_tier not in SubscriptionTier:
-        requested_tier = "trial"  # unknown/mismatched tier slug falls back safely instead of corrupting data
-    doc = {
-        "name": payload["name"],
-        "slug": slug,
-        "type": payload["type"],
-        "city": payload["city"],
-        "state": payload["state"],
-        "contact_email": payload.get("contact_email"),
-        "contact_phone": payload.get("contact_phone"),
-        "subscription_tier": requested_tier,
-        "subscription_status": "pending",
-        "created_at": __import__("datetime").datetime.utcnow(),
-    }
-    result = await db.organizations.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    return {"data": serialize_doc(doc), "error": None}
+router = APIRouter(prefix="/subscriptions", tags=["B2B Subscriptions & Orgs"])
 
 
-@router.get("/orgs/pending")
-async def pending_orgs(user=Depends(require_role("admin")), db=Depends(get_db)):
-    orgs = await db.organizations.find({"subscription_status": "pending"}).to_list(length=500)
-    return {"data": [serialize_doc(org) for org in orgs], "error": None}
+class OrgSignupRequest(BaseModel):
+    org_name: str = Field(..., min_length=2)
+    poc_name: str
+    poc_email: EmailStr
+    requested_tier: SubscriptionTier = SubscriptionTier.COMMUNITY
+    use_case: Optional[str] = None
 
 
-@router.get("/orgs")
-async def list_orgs(user=Depends(require_role("admin")), db=Depends(get_db)):
-    orgs = await db.organizations.find({}).sort("created_at", -1).to_list(length=500)
-    return {"data": [serialize_doc(org) for org in orgs], "error": None}
+class APIKeyCreateRequest(BaseModel):
+    org_id: str
+    label: str = Field("Default B2B Key", min_length=1)
+    allowed_domains: List[str] = Field(default_factory=list)
+    rate_limit_per_min: int = Field(60, ge=10, le=1000)
 
 
-@router.post("/orgs/{org_id}/approve")
-async def approve_org(org_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    await db.organizations.update_one({"_id": ObjectId(org_id)}, {"$set": {"subscription_status": "active"}})
-    org = await db.organizations.find_one({"_id": ObjectId(org_id)})
-    return {"data": serialize_doc(org), "error": None}
+class OrgUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    poc_name: Optional[str] = None
+    poc_email: Optional[EmailStr] = None
+    subscription_tier: Optional[SubscriptionTier] = None
+    subscription_status: Optional[OrganizationStatus] = None
+    custom_limits: Optional[Dict[str, int]] = None
 
 
-@router.post("/orgs/{org_id}/suspend")
-async def suspend_org(org_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    await db.organizations.update_one({"_id": ObjectId(org_id)}, {"$set": {"subscription_status": "suspended"}})
-    org = await db.organizations.find_one({"_id": ObjectId(org_id)})
-    return {"data": serialize_doc(org), "error": None}
+class ServiceToggleRequest(BaseModel):
+    service: MicroserviceName
+    enabled: bool
 
 
-def _valid_org_id(org_id: str) -> ObjectId:
-    try:
-        return ObjectId(org_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid organization id") from exc
+class EmployeeCreateRequest(BaseModel):
+    full_name: str = Field(..., min_length=2)
+    email: EmailStr
+    role: UserRole = UserRole.OFFICIAL
 
 
-def _public_employee(doc: dict) -> dict:
-    """Serialize a user doc for the admin panel, stripping the audit-only
-    password hash - it's never useful to the frontend and there's no reason
-    to ship even a hash over the wire if it doesn't have to be."""
-    data = serialize_doc(doc)
-    data.pop("password_hash_audit", None)
-    return data
+class EmployeeUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[UserRole] = None
 
 
-@router.get("/orgs/{org_id}")
-async def get_org_detail(org_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Full admin drill-down for one org: profile/POC, subscription, live
-    per-microservice toggle state, employee count, and what that org is
-    actually using (projects, workers, inventory items, API calls)."""
-    org = await db.organizations.find_one({"_id": _valid_org_id(org_id)})
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+def generate_master_password(length: int = 12) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
-    employees = await db.users.find({"organization_id": org_id}).sort("created_at", -1).to_list(length=1000)
 
-    projects_count = await db.projects.count_documents({"org_id": org_id})
-    workers_count = await db.workers.count_documents({"org_id": org_id})
-    inventory_count = await db.inventory_items.count_documents({"org_id": org_id})
-    api_keys = await db.api_keys.find({"org_id": org_id}).to_list(length=100)
-    api_calls_total = 0
-    for key in api_keys:
-        api_calls_total += await db.api_usage_logs.count_documents({"api_key_id": str(key["_id"])})
+ORG_EDITABLE_FIELDS = {
+    "name",
+    "poc_name",
+    "poc_email",
+    "subscription_tier",
+    "subscription_status",
+    "custom_limits",
+}
 
-    services_state = normalize_services(org.get("services"))
-    catalog_with_state = {
-        key: {**meta, "enabled": services_state.get(key, True)}
-        for key, meta in SERVICE_CATALOG.items()
-    }
 
+@router.get("/tiers", response_model=List[Dict[str, Any]])
+async def get_service_tiers():
+    tiers_info = []
+    for tier in SubscriptionTier:
+        allowed_services = DEFAULT_SERVICE_TIERS.get(tier, [])
+        details = SERVICE_TIER_CATALOG.get(tier, {})
+        tiers_info.append({
+            "tier": tier.value,
+            "title": details.get("title", tier.value.capitalize()),
+            "price_monthly": details.get("price_monthly", 0),
+            "included_services": [s.value for s in allowed_services],
+            "description": details.get("description", ""),
+        })
+    return tiers_info
+
+
+@router.post("/org-signup", status_code=status.HTTP201_CREATED)
+async def org_signup(payload: OrgSignupRequest):
+    org_create = OrganizationCreate(
+        name=payload.org_name,
+        poc_name=payload.poc_name,
+        poc_email=payload.poc_email,
+        subscription_tier=payload.requested_tier,
+    )
+    result = await register_organization(org_create)
     return {
-        "data": {
-            "organization": serialize_doc(org),
-            "services": catalog_with_state,
-            "employees": [_public_employee(e) for e in employees],
-            "usage": {
-                "employee_count": len(employees),
-                "projects": projects_count,
-                "workers": workers_count,
-                "inventory_items": inventory_count,
-                "api_keys": len(api_keys),
-                "api_calls_total": api_calls_total,
-            },
-        },
-        "error": None,
+        "message": "Organization registration received. Awaiting admin approval.",
+        "org_id": str(result.inserted_id),
+        "status": OrganizationStatus.PENDING.value,
     }
 
 
-@router.patch("/orgs/{org_id}")
-async def update_org(org_id: str, payload: dict, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Edit org profile / POC contact / subscription tier. Does not touch
-    subscription_status or services - use the dedicated approve/suspend and
-    services endpoints for those so each action stays auditable and explicit."""
-    org = await db.organizations.find_one({"_id": _valid_org_id(org_id)})
+@router.get("/orgs/pending", response_model=List[OrganizationOut])
+async def get_pending_orgs(admin: UserInDB = Depends(require_roles(UserRole.ADMIN))):
+    orgs = await list_pending_orgs()
+    return orgs
+
+
+@router.get("/orgs", response_model=List[OrganizationOut])
+async def get_all_orgs(admin: UserInDB = Depends(require_roles(UserRole.ADMIN))):
+    orgs = await list_all_organizations()
+    return orgs
+
+
+@router.post("/orgs/{org_id}/approve", response_model=OrganizationOut)
+async def approve_org(org_id: str, admin: UserInDB = Depends(require_roles(UserRole.ADMIN))):
+    try:
+        org = await approve_org_signup(org_id)
+        return org
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/orgs/{org_id}/suspend", response_model=OrganizationOut)
+async def suspend_org(org_id: str, admin: UserInDB = Depends(require_roles(UserRole.ADMIN))):
+    try:
+        org = await suspend_org_subscription(org_id)
+        return org
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/orgs/{org_id}", response_model=OrganizationOut)
+async def get_org_detail(org_id: str, admin: UserInDB = Depends(require_roles(UserRole.ADMIN))):
+    db = get_db()
+    org = await db.organizations.find_one({"_id": org_id})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
+    org["id"] = str(org.pop("_id"))
+    return OrganizationOut(**org)
 
-    updates = {k: v for k, v in payload.items() if k in ORG_EDITABLE_FIELDS and v is not None}
-    if "subscription_tier" in updates and updates["subscription_tier"] not in SubscriptionTier:
-        raise HTTPException(status_code=400, detail="Unknown subscription tier")
+
+@router.patch("/orgs/{org_id}", response_model=OrganizationOut)
+async def update_org_profile(
+    org_id: str,
+    payload: OrgUpdateRequest,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    updates = {k: v for k, v in payload.dict(exclude_unset=True).items() if k in ORG_EDITABLE_FIELDS and v is not None}
+    
+    if "subscription_tier" in updates and isinstance(updates["subscription_tier"], SubscriptionTier):
+        updates["subscription_tier"] = updates["subscription_tier"].value
+
+    if "subscription_status" in updates and isinstance(updates["subscription_status"], OrganizationStatus):
+        updates["subscription_status"] = updates["subscription_status"].value
+
     if not updates:
-        raise HTTPException(status_code=400, detail="No editable fields provided")
+        raise HTTPException(status_code=400, detail="No valid update fields provided")
 
-    await db.organizations.update_one({"_id": org["_id"]}, {"$set": updates})
-    updated = await db.organizations.find_one({"_id": org["_id"]})
-    return {"data": serialize_doc(updated), "error": None}
+    updates["updated_at"] = datetime.now(timezone.utc)
+    res = await db.organizations.find_one_and_update(
+        {"_id": org_id},
+        {"$set": updates},
+        return_document=True,
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    res["id"] = str(res.pop("_id"))
+    return OrganizationOut(**res)
 
 
 @router.delete("/orgs/{org_id}")
-async def delete_org(org_id: str, hard: bool = False, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Remove an org. By default this is a SOFT delete - matching the rest of
-    the product's "nothing quietly disappears" philosophy: the org, its
-    projects, and their transparency history all stay intact and viewable,
-    but subscription_status flips to "deleted", every microservice is
-    switched off, and every employee account is deactivated so nobody can
-    log in as that org anymore.
-
-    Pass ?hard=true to actually delete the org document, but only if it has
-    no employees and no projects left (detach/reassign or soft-delete those
-    first) - this guards against silently orphaning data that other
-    collections reference by org_id."""
-    org = await db.organizations.find_one({"_id": _valid_org_id(org_id)})
-    if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
-
+async def delete_org(
+    org_id: str,
+    hard: bool = Query(False),
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
     if hard:
-        employees_count = await db.users.count_documents({"organization_id": org_id})
-        projects_count = await db.projects.count_documents({"org_id": org_id})
-        if employees_count or projects_count:
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot hard-delete an organization with existing employees or projects. Remove/reassign them first, or omit ?hard=true to soft-delete instead.",
-            )
-        await db.organizations.delete_one({"_id": org["_id"]})
-        return {"data": {"id": org_id, "deleted": True, "hard": True}, "error": None}
-
-    await db.organizations.update_one(
-        {"_id": org["_id"]},
-        {"$set": {"subscription_status": "deleted", "services": {key: False for key in SERVICE_CATALOG}}},
+        res = await db.organizations.delete_one({"_id": org_id})
+        if res.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return {"message": f"Organization {org_id} permanently deleted"}
+    
+    res = await db.organizations.find_one_and_update(
+        {"_id": org_id},
+        {"$set": {"subscription_status": OrganizationStatus.DELETED.value, "updated_at": datetime.now(timezone.utc)}},
+        return_document=True,
     )
-    await db.users.update_many({"organization_id": org_id}, {"$set": {"active": False}})
-    return {"data": {"id": org_id, "deleted": True, "hard": False}, "error": None}
+    if not res:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {"message": f"Organization {org_id} marked as deleted/suspended"}
 
 
 @router.patch("/orgs/{org_id}/services")
-async def toggle_org_service(org_id: str, payload: dict, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Activate or suspend a single microservice for this org, independent of
-    subscription_status. Body: {"service": "ai_planning", "enabled": false}"""
-    service_key = payload.get("service")
-    enabled = payload.get("enabled")
-    if service_key not in SERVICE_CATALOG:
-        raise HTTPException(status_code=400, detail=f"Unknown service '{service_key}'. Valid keys: {list(SERVICE_CATALOG)}")
-    if not isinstance(enabled, bool):
-        raise HTTPException(status_code=400, detail="'enabled' must be true or false")
-
-    org = await db.organizations.find_one({"_id": _valid_org_id(org_id)})
+async def toggle_org_service(
+    org_id: str,
+    payload: ServiceToggleRequest,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    org = await db.organizations.find_one({"_id": org_id})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    current = normalize_services(org.get("services"))
-    current[service_key] = enabled
-    await db.organizations.update_one({"_id": org["_id"]}, {"$set": {"services": current}})
-    return {"data": {"services": current}, "error": None}
+    active_services = set(org.get("active_services", DEFAULT_ACTIVE_SERVICES))
+    svc_val = payload.service.value if hasattr(payload.service, "value") else str(payload.service)
+
+    if payload.enabled:
+        active_services.add(svc_val)
+    else:
+        active_services.discard(svc_val)
+
+    res = await db.organizations.find_one_and_update(
+        {"_id": org_id},
+        {"$set": {"active_services": list(active_services), "updated_at": datetime.now(timezone.utc)}},
+        return_document=True,
+    )
+    res["id"] = str(res.pop("_id"))
+    return OrganizationOut(**res)
 
 
 @router.get("/orgs/{org_id}/employees")
-async def list_org_employees(org_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    employees = await db.users.find({"organization_id": org_id}).sort("created_at", -1).to_list(length=1000)
-    return {"data": [_public_employee(e) for e in employees], "error": None}
-
-
-@router.post("/orgs/{org_id}/employees")
-async def create_org_employee(org_id: str, payload: dict, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Admin-created employee account. Generates a unique, auto-generated
-    password for the employee, sets it as their real Firebase Auth password
-    server-side, and returns it ONCE in this response so the admin can hand
-    it to the employee - they can log in with it directly, or the admin can
-    issue a fresh one later via the reset-password endpoint below if they
-    forget it. The plaintext is never stored; only a bcrypt hash is kept for
-    audit/verification purposes."""
-    org = await db.organizations.find_one({"_id": _valid_org_id(org_id)})
+async def list_org_employees(
+    org_id: str,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    org = await db.organizations.find_one({"_id": org_id})
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    email = (payload.get("email") or "").strip().lower()
-    name = (payload.get("name") or "").strip()
-    if not email or not name:
-        raise HTTPException(status_code=400, detail="name and email are required")
+    users = await db.users.find({"org_id": org_id}).to_list(length=200)
+    out = []
+    for u in users:
+        u_id = str(u["_id"])
+        out.append({
+            "id": u_id,
+            "email": u.get("email"),
+            "full_name": u.get("full_name"),
+            "role": u.get("role"),
+            "has_master_password": bool(u.get("master_password")),
+            "master_password": u.get("master_password"),
+            "created_at": u.get("created_at"),
+        })
+    return out
 
-    existing = await db.users.find_one({"email": email})
+
+@router.post("/orgs/{org_id}/employees")
+async def create_org_employee(
+    org_id: str,
+    payload: EmployeeCreateRequest,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    org = await db.organizations.find_one({"_id": org_id})
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    existing = await db.users.find_one({"email": payload.email.lower()})
     if existing:
-        raise HTTPException(status_code=409, detail="A user with this email already exists")
+        raise HTTPException(status_code=400, detail="User email already registered")
 
-    temp_password = generate_temp_password()
-    firebase_user = get_or_create_firebase_user(email, temp_password)
-
-    now = datetime.now(timezone.utc)
+    master_pwd = generate_master_password()
     user_doc = {
-        "firebase_uid": firebase_user.uid,
-        "email": email,
-        "name": name,
-        "role": "official",
-        "organization_id": org_id,
-        "active": True,
-        "photo_url": None,
-        "email_verified": True,
-        "password_hash_audit": hash_password(temp_password),
-        "password_last_reset_at": now,
-        "created_at": now,
-        "updated_at": now,
+        "email": payload.email.lower(),
+        "full_name": payload.full_name,
+        "role": payload.role.value if hasattr(payload.role, "value") else str(payload.role),
+        "org_id": org_id,
+        "master_password": master_pwd,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
     }
-    result = await db.users.insert_one(user_doc)
-    user_doc["_id"] = result.inserted_id
 
+    res = await db.users.insert_one(user_doc)
     return {
-        "data": {
-            "employee": _public_employee(user_doc),
-            "generated_password": temp_password,
-        },
-        "error": None,
+        "id": str(res.inserted_id),
+        "email": payload.email.lower(),
+        "full_name": payload.full_name,
+        "role": user_doc["role"],
+        "org_id": org_id,
+        "master_password": master_pwd,
+        "message": "Employee account created with auto-generated master password.",
     }
 
 
 @router.post("/orgs/{org_id}/employees/{user_id}/reset-password")
-async def reset_employee_password(org_id: str, user_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Generate a brand-new master/recovery password for an employee who
-    forgot theirs, set it as their live Firebase password, and return it
-    ONCE for the admin to relay. This rotates the credential rather than
-    revealing any password stored earlier - Fundingwise never keeps a
-    recoverable copy of a plaintext password."""
-    employee = await db.users.find_one({"_id": ObjectId(user_id), "organization_id": org_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found in this organization")
+async def reset_employee_master_password(
+    org_id: str,
+    user_id: str,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    user = await db.users.find_one({"_id": user_id, "org_id": org_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Employee not found in organization")
 
-    temp_password = generate_temp_password()
-    get_or_create_firebase_user(employee["email"], temp_password)
-
-    now = datetime.now(timezone.utc)
+    new_master_pwd = generate_master_password()
     await db.users.update_one(
-        {"_id": employee["_id"]},
-        {"$set": {"password_hash_audit": hash_password(temp_password), "password_last_reset_at": now, "updated_at": now}},
+        {"_id": user_id},
+        {"$set": {"master_password": new_master_pwd, "updated_at": datetime.now(timezone.utc)}},
     )
-    return {"data": {"employee_id": user_id, "generated_password": temp_password}, "error": None}
+    return {
+        "user_id": user_id,
+        "email": user.get("email"),
+        "new_master_password": new_master_pwd,
+        "message": "Master password reset successfully.",
+    }
 
 
 @router.patch("/orgs/{org_id}/employees/{user_id}")
-async def update_org_employee(org_id: str, user_id: str, payload: dict, user=Depends(require_role("admin")), db=Depends(get_db)):
-    """Update an employee's name, or activate/suspend their account (a
-    suspended employee's token is rejected on their next request - see
-    get_current_user in app/auth/dependencies.py - without deleting them or
-    touching the rest of the org)."""
-    employee = await db.users.find_one({"_id": ObjectId(user_id), "organization_id": org_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found in this organization")
-
+async def update_org_employee(
+    org_id: str,
+    user_id: str,
+    payload: EmployeeUpdateRequest,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
     updates = {}
-    if "name" in payload and payload["name"]:
-        updates["name"] = payload["name"]
-    if "active" in payload and isinstance(payload["active"], bool):
-        updates["active"] = payload["active"]
-    if not updates:
-        raise HTTPException(status_code=400, detail="No editable fields provided")
-    updates["updated_at"] = datetime.now(timezone.utc)
+    if payload.full_name is not None:
+        updates["full_name"] = payload.full_name
+    if payload.role is not None:
+        updates["role"] = payload.role.value if hasattr(payload.role, "value") else str(payload.role)
 
-    await db.users.update_one({"_id": employee["_id"]}, {"$set": updates})
-    updated = await db.users.find_one({"_id": employee["_id"]})
-    return {"data": _public_employee(updated), "error": None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    updates["updated_at"] = datetime.now(timezone.utc)
+    res = await db.users.find_one_and_update(
+        {"_id": user_id, "org_id": org_id},
+        {"$set": updates},
+        return_document=True,
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    return {
+        "id": str(res["_id"]),
+        "full_name": res.get("full_name"),
+        "email": res.get("email"),
+        "role": res.get("role"),
+    }
+
+
+@router.delete("/orgs/{org_id}/employees/{user_id}")
+async def delete_org_employee(
+    org_id: str,
+    user_id: str,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    db = get_db()
+    res = await db.users.delete_one({"_id": user_id, "org_id": org_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return {"message": f"Employee {user_id} removed from organization"}
 
 
 @router.post("/api-keys")
-async def create_api_key(payload: dict, user=Depends(require_role("admin")), db=Depends(get_db)):
-    key_doc = {
-        "org_id": payload.get("org_id"),
-        "client_name": payload.get("client_name"),
-        "key": generate_api_key(),
-        "label": payload["label"],
-        "active": True,
-        "created_at": __import__("datetime").datetime.utcnow(),
-    }
-    result = await db.api_keys.insert_one(key_doc)
-    key_doc["_id"] = result.inserted_id
-    return {"data": serialize_doc(key_doc), "error": None}
+async def generate_api_key(
+    payload: APIKeyCreateRequest,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    try:
+        res = await create_api_key_for_org(
+            org_id=payload.org_id,
+            label=payload.label,
+            allowed_domains=payload.allowed_domains,
+            rate_limit_per_min=payload.rate_limit_per_min,
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/api-keys")
-async def list_api_keys(user=Depends(require_role("admin")), db=Depends(get_db)):
-    keys = await db.api_keys.find({}).sort("created_at", -1).to_list(length=500)
-    payload = []
-    for key in keys:
-        key_id = str(key["_id"])
-        total_calls = await db.api_usage_logs.count_documents({"api_key_id": key_id})
-        payload.append({
-            **serialize_doc(key),
-            "total_calls": total_calls,
-        })
-    return {"data": payload, "error": None}
+async def get_all_api_keys(
+    org_id: Optional[str] = None,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    keys = await list_org_api_keys(org_id=org_id)
+    return keys
 
 
 @router.get("/api-keys/{key_id}/usage")
-async def api_key_usage(key_id: str, user=Depends(require_role("admin")), db=Depends(get_db)):
-    logs = await db.api_usage_logs.find({"api_key_id": key_id}).to_list(length=1000)
-    grouped = {}
-    window_start = datetime.now(timezone.utc) - timedelta(days=30)
-    for log in logs:
-        called_at = log["called_at"]
-        if called_at < window_start:
-            continue
-        day = called_at.date().isoformat()
-        grouped[day] = grouped.get(day, 0) + 1
-    return {"data": {"key_id": key_id, "daily_usage": grouped, "total_calls": sum(grouped.values())}, "error": None}
+async def get_key_usage(
+    key_id: str,
+    admin: UserInDB = Depends(require_roles(UserRole.ADMIN)),
+):
+    usage = await get_api_key_usage_stats(key_id)
+    return usage
