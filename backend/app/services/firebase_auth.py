@@ -34,3 +34,17 @@ def _firebase_app() -> firebase_admin.App:
 def verify_firebase_token(token: str) -> dict[str, Any]:
     _firebase_app()
     return firebase_auth.verify_id_token(token, check_revoked=True)
+
+
+def get_or_create_firebase_user(email: str, password: str) -> firebase_auth.UserRecord:
+    """Server-side account creation via the Admin SDK - used only by the one-time
+    admin bootstrap script (backend/bootstrap_admin.py). This never runs from a
+    public-facing route; it's how the owner's own login gets created without
+    exposing an admin option on the public /register page."""
+    _firebase_app()
+    try:
+        user = firebase_auth.get_user_by_email(email)
+        firebase_auth.update_user(user.uid, password=password, email_verified=True)
+        return firebase_auth.get_user(user.uid)
+    except firebase_auth.UserNotFoundError:
+        return firebase_auth.create_user(email=email, password=password, email_verified=True)

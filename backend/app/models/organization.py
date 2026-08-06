@@ -14,7 +14,7 @@ class Organization(BaseModel):
     id: Optional[str] = None
     name: str
     slug: str
-    type: Literal["municipal_corporation", "panchayat", "admin"]
+    type: Literal["municipal_corporation", "panchayat", "department", "admin"]
     city: str
     state: str
     subscription_tier: Literal["trial", "standard", "enterprise"] = "trial"

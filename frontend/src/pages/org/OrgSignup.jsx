@@ -3,8 +3,12 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { orgSignup } from "../../api/subscriptions";
 
+const VALID_TIERS = ["trial", "standard", "enterprise"];
+
 export default function OrgSignup() {
   const [searchParams] = useSearchParams();
+  const requestedTierFromUrl = searchParams.get("tier");
+  const initialTier = VALID_TIERS.includes(requestedTierFromUrl) ? requestedTierFromUrl : "trial";
   const [form, setForm] = useState({
     name: "",
     type: "municipal_corporation",
@@ -12,7 +16,7 @@ export default function OrgSignup() {
     state: "",
     contact_email: "",
     contact_phone: "",
-    requested_tier: searchParams.get("tier") || "trial",
+    requested_tier: initialTier,
   });
   const [success, setSuccess] = useState(false);
 
@@ -29,6 +33,15 @@ export default function OrgSignup() {
           <h1 className="text-3xl font-semibold text-[#111827]">Request received</h1>
           <p className="mt-4 text-[#4b5563]">
             We will confirm the organization profile and enable access once the account is provisioned.
+          </p>
+          <div className="mt-6 rounded-2xl border border-[#e5edf7] bg-[#fbfdff] p-4 text-left text-sm text-[#4b5563]">
+            <div><span className="font-semibold text-[#111827]">Organization:</span> {form.name}</div>
+            <div><span className="font-semibold text-[#111827]">Requested tier:</span> {form.requested_tier}</div>
+            <div><span className="font-semibold text-[#111827]">Contact:</span> {form.contact_email || "not provided"}</div>
+          </div>
+          <p className="mt-4 text-xs text-[#6b7280]">
+            This request now shows up in the Fundingwise admin console under Organizations &rarr; Subscription requests
+            (pending). This is a manual-approval flow for the MVP - no payment is collected here yet.
           </p>
         </div>
       </div>

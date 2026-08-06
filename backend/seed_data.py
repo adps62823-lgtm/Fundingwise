@@ -29,6 +29,11 @@ async def main():
 
     admin_user = await db.users.find_one({"email": settings.ADMIN_SEED_EMAIL.lower()})
     if not admin_user:
+        # NOTE: `hashed_password` is written here for backward compatibility with the
+        # original JWT-based auth design, but it is NOT checked anywhere anymore.
+        # All real authentication now goes through Firebase (see app/auth/dependencies.py).
+        # This Mongo document only exists to PRE-AUTHORIZE the admin role for this email —
+        # see the "First-time admin login" section in README.md for how to actually sign in.
         await db.users.insert_one(
             {
                 "email": settings.ADMIN_SEED_EMAIL.lower(),
@@ -70,10 +75,21 @@ async def main():
         )
 
     print("Created or verified:")
-    print(f"Admin org: Fundingwise Admin")
-    print(f"Admin login: {settings.ADMIN_SEED_EMAIL} / {settings.ADMIN_SEED_PASSWORD}")
-    print(f"Demo org: Demo Municipal Corporation")
-    print("Demo official: official@fundingwise.local / demo1234")
+    print("Admin org: Fundingwise Admin")
+    print("")
+    print("Admin login is NOT ready yet from this script alone - it only pre-authorizes")
+    print(f"the role for {settings.ADMIN_SEED_EMAIL} in MongoDB. Now run:")
+    print("")
+    print("    python bootstrap_admin.py")
+    print("")
+    print("That creates the actual Firebase account server-side (Admin SDK), so you can")
+    print(f"log in directly at /login with {settings.ADMIN_SEED_EMAIL} and the password")
+    print("from ADMIN_SEED_PASSWORD in .env - no public registration step, ever.")
+    print("")
+    print(f"Demo org: Demo Municipal Corporation (id: {demo_org['_id']})")
+    print("Demo official is a normal self-service account, unlike admin:")
+    print("  go to /register, choose 'Official', use official@fundingwise.local,")
+    print(f"  any password, and organization ID: {demo_org['_id']}")
 
 
 if __name__ == "__main__":

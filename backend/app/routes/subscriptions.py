@@ -15,9 +15,19 @@ from app.utils.serializers import serialize_doc
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
 
+@router.get("/tiers")
+async def get_tiers():
+    # Single source of truth for pricing - the frontend Pricing page should read
+    # from this instead of hardcoding tier names, so the two can never drift apart.
+    return {"data": SubscriptionTier, "error": None}
+
+
 @router.post("/org-signup")
 async def org_signup(payload: dict, db=Depends(get_db)):
     slug = re.sub(r"[^a-z0-9]+", "-", payload["name"].lower()).strip("-")
+    requested_tier = payload.get("requested_tier", "trial")
+    if requested_tier not in SubscriptionTier:
+        requested_tier = "trial"  # unknown/mismatched tier slug falls back safely instead of corrupting data
     doc = {
         "name": payload["name"],
         "slug": slug,
@@ -26,7 +36,7 @@ async def org_signup(payload: dict, db=Depends(get_db)):
         "state": payload["state"],
         "contact_email": payload.get("contact_email"),
         "contact_phone": payload.get("contact_phone"),
-        "subscription_tier": payload.get("requested_tier", "trial"),
+        "subscription_tier": requested_tier,
         "subscription_status": "pending",
         "created_at": __import__("datetime").datetime.utcnow(),
     }

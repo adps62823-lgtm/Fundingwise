@@ -161,19 +161,28 @@ export default function AdminHome() {
         {activeTab === "orgs" && (
           <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_.8fr]">
             <section>
-              <h2 className="text-xl font-semibold text-[#0f172a]">Pending organizations</h2>
+              <h2 className="text-xl font-semibold text-[#0f172a]">Subscription requests</h2>
+              <p className="mt-1 text-sm text-[#6b7280]">
+                Organizations that submitted the "Request Access" form on the Pricing page, waiting on manual approval.
+              </p>
               <div className="mt-4 space-y-3">
                 {pendingOrgs.map((org) => (
                   <div key={org.id} className="ibm-panel">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="font-semibold text-[#0f172a]">{org.name}</div>
                         <div className="text-sm text-[#4b5563]">
-                          {org.city}, {org.state}
+                          {org.city}, {org.state} &middot; {org.type}
                         </div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-[#6b7280]">
-                          {org.subscription_tier} • {org.subscription_status}
+                        <div className="mt-1 text-xs uppercase tracking-[0.18em] text-[#6b7280]">
+                          Requested tier: {org.subscription_tier}
                         </div>
+                        {(org.contact_email || org.contact_phone) && (
+                          <div className="mt-2 text-sm text-[#4b5563]">
+                            {org.contact_email && <div>Email: {org.contact_email}</div>}
+                            {org.contact_phone && <div>Phone: {org.contact_phone}</div>}
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button className="ibm-button-primary" onClick={() => handleApprove(org.id)}>
@@ -186,7 +195,7 @@ export default function AdminHome() {
                     </div>
                   </div>
                 ))}
-                {!pendingOrgs.length && <p className="text-sm text-[#6b7280]">No pending organizations.</p>}
+                {!pendingOrgs.length && <p className="text-sm text-[#6b7280]">No pending subscription requests right now.</p>}
               </div>
             </section>
 

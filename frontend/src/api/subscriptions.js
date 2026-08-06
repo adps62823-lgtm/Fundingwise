@@ -1,5 +1,6 @@
 import client from "./client";
 
+export const getTiers = async () => (await client.get("/api/v1/subscriptions/tiers")).data;
 export const orgSignup = async (payload) => (await client.post("/api/v1/subscriptions/org-signup", payload)).data;
 export const listPendingOrgs = async () => (await client.get("/api/v1/subscriptions/orgs/pending")).data;
 export const listOrganizations = async () => (await client.get("/api/v1/subscriptions/orgs")).data;
