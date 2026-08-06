@@ -9,7 +9,7 @@
     { name: "Aniket Singh", role: "President", note: "Work Coordination and Supervision" },
     { name: "Shikhar Singh", role: "VP and Marketing Head", note: "Under President and Marketing" },
     { name: "Ayan Singh", role: "Relationship Management Head", note: "Customer Manager" },
-    { name: "Anik Anand", role: "Social Media Handler", note: "" },
+    { name: "Anik Anand", role: "Social Media Handler", note: "Social Platform Manager" },
   ],
 };
 
