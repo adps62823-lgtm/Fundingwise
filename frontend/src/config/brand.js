@@ -1,7 +1,7 @@
 ﻿export const BRAND = {
   name: "Fundingwise",
   tagline: "Transparency | Planning | Impact",
-  logoLandscape: "/logo-landscape.png",
+  logoLandscape: "/Fwlogolandscape.png",
   logoIconDark: "/logo-icon-dark.png",
   logoIconLight: "/logo-icon-light.png",
   team: [
@@ -9,6 +9,7 @@
     { name: "Aniket Singh", role: "President", note: "Work Coordination and Supervision" },
     { name: "Shikhar Singh", role: "VP and Marketing Head", note: "Under President and Marketing" },
     { name: "Ayan Singh", role: "Relationship Management Head", note: "Customer Manager" },
-    { name: "Anik Anand", role: "Assistant Relationship Manager", note: "Support and coordination" },
+    { name: "Anik Anand", role: "Asst. Clerk", note: "Sweeping of Clerk's Office" },
   ],
 };
+
