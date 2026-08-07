@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --fw-blue: #e88bda;
+  --fw-blue: #0176d3;
   --fw-blue-hover: #014486;
   --fw-blue-soft: rgba(1, 118, 211, 0.12);
-  --fw-teal: #df2fc4;
+  --fw-teal: #0176d3;
   --fw-teal-soft: rgba(1, 118, 211, 0.12);
   --fw-gold: #b78103;
   --fw-gold-soft: rgba(183, 129, 3, 0.12);
@@ -410,7 +410,7 @@ button:disabled,
 }
 
 .ibm-button-primary {
-  background: linear-gradient(135deg, #0176d3, #1b8be3);
+  background: linear-gradient(135deg, #d545b8, #c71dda);
   color: #ffffff;
   border-color: rgba(1, 118, 211, 0.25);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
