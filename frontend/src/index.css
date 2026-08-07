@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --fw-blue: #0176d3;
+  --fw-blue: #e88bda;
   --fw-blue-hover: #014486;
   --fw-blue-soft: rgba(1, 118, 211, 0.12);
-  --fw-teal: #0176d3;
+  --fw-teal: #df2fc4;
   --fw-teal-soft: rgba(1, 118, 211, 0.12);
   --fw-gold: #b78103;
   --fw-gold-soft: rgba(183, 129, 3, 0.12);
