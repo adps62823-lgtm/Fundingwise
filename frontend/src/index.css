@@ -410,7 +410,7 @@ button:disabled,
 }
 
 .ibm-button-primary {
-  background: linear-gradient(135deg, #ea95c6, #de75ea);
+  background: linear-gradient(135deg, #0176d3, #1b8be3);
   color: #ffffff;
   border-color: rgba(1, 118, 211, 0.25);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
